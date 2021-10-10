@@ -20,7 +20,6 @@ defmodule Streamer.Binance do
     # IO.puts "Received Message - Type: #{inspect type} -- Message: #{inspect msg}"
     # {:ok, state}
 
-
     {:ok, state}
   end
 
@@ -47,5 +46,7 @@ defmodule Streamer.Binance do
       "Trade event received " <>
         "#{trade_event.symbol}@#{trade_event.price}"
     )
+
+    Naive.send_event(trade_event)
   end
 end
