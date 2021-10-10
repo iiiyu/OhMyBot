@@ -1,10 +1,10 @@
 defmodule Naive.Trader do
   use GenServer
 
-  require Logger
-
-  alias Streamer.Binance.TradeEvent
   alias Decimal, as: D
+  alias Streamer.Binance.TradeEvent
+
+  require Logger
 
   defmodule State do
     @enforce_keys [:symbol, :profit_interval, :tick_size]
@@ -26,6 +26,11 @@ defmodule Naive.Trader do
 
     Logger.info("Initializing new trader for #{symbol}")
 
+    Phoenix.PubSub.subscribe(
+      Streamer.PubSub,
+      "TRADE_EVENTS:#{symbol}"
+    )
+
     tick_size = fetch_tick_size(symbol)
 
     {:ok,
@@ -36,21 +41,10 @@ defmodule Naive.Trader do
      }}
   end
 
-  defp fetch_tick_size(symbol) do
-    Binance.get_exchange_info()
-    |> elem(1)
-    |> Map.get(:symbols)
-    |> Enum.find(&(&1["symbol"] == symbol))
-    |> Map.get("filters")
-    |> Enum.find(&(&1["filterType"] == "PRICE_FILTER"))
-    |> Map.get("tickSize")
-  end
-
-  def handle_cast(
+  def handle_info(
         %TradeEvent{price: price},
         %State{symbol: symbol, buy_order: nil} = state
       ) do
-    # Hardcoded until chapter 7
     quantity = "10"
 
     Logger.info("Placing BUY order for #{symbol} @ #{price}, quantity: #{quantity}")
@@ -61,7 +55,7 @@ defmodule Naive.Trader do
     {:noreply, %{state | buy_order: order}}
   end
 
-  def handle_cast(
+  def handle_info(
         %TradeEvent{
           buyer_order_id: order_id,
           quantity: quantity
@@ -80,8 +74,8 @@ defmodule Naive.Trader do
     sell_price = calculate_sell_price(buy_price, profit_interval, tick_size)
 
     Logger.info(
-      "Buy order filled, placing SELL order for" <>
-        "#{symbol} @ #{sell_price}), quantity: #{quantity}"
+      "Buy order filled, placing SELL order for " <>
+        "#{symbol} @ #{sell_price}, quantity: #{quantity}"
     )
 
     {:ok, %Binance.OrderResponse{} = order} =
@@ -90,7 +84,7 @@ defmodule Naive.Trader do
     {:noreply, %{state | sell_order: order}}
   end
 
-  def handle_cast(
+  def handle_info(
         %TradeEvent{
           seller_order_id: order_id,
           quantity: quantity
@@ -106,13 +100,12 @@ defmodule Naive.Trader do
     {:stop, :normal, state}
   end
 
-  def handle_cast(%TradeEvent{}, state) do
+  def handle_info(%TradeEvent{}, state) do
     {:noreply, state}
   end
 
   defp calculate_sell_price(buy_price, profit_interval, tick_size) do
     fee = "1.001"
-
     original_price = D.mult(buy_price, fee)
 
     net_target_price =
@@ -130,5 +123,15 @@ defmodule Naive.Trader do
       ),
       :normal
     )
+  end
+
+  defp fetch_tick_size(symbol) do
+    Binance.get_exchange_info()
+    |> elem(1)
+    |> Map.get(:symbols)
+    |> Enum.find(&(&1["symbol"] == symbol))
+    |> Map.get("filters")
+    |> Enum.find(&(&1["filterType"] == "PRICE_FILTER"))
+    |> Map.get("tickSize")
   end
 end
